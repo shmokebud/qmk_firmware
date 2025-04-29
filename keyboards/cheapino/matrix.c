@@ -26,10 +26,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "quantum.h"
 #include "debounce.h"
 #include "encoder.h"
+#include "ghosting.h"
 #include "print.h"
 
 // How long the scanning code waits for changed io to settle.
-#define MATRIX_IO_DELAY 30
+// Adjust from default 30 to weigh up for increased time spent ghost-hunting.
+// (the rp2040 does not seem to have any problems with this value...)
+#define MATRIX_IO_DELAY 25
 
 #define COL_SHIFTER ((uint16_t)1)
 
@@ -94,7 +97,7 @@ static void read_rows_on_col(matrix_row_t current_matrix[], uint8_t current_col)
 
     uint16_t column_index_bitmask = COL_SHIFTER << (current_col * 2);
     // For each row...
-    for (uint8_t row_index = 0; row_index < MATRIX_ROWS-1; row_index++) {
+    for (uint8_t row_index = 0; row_index < MATRIX_ROWS; row_index++) {
         // Check row pin state
         if (readPin(row_pins[row_index])) {
             // Pin HI, clear col bit
@@ -113,8 +116,6 @@ void matrix_init_custom(void) {
     // initialize key pins
     unselect_cols();
     unselect_rows();
-    setPinInput(row_pins[MATRIX_ROWS-1]);
-    writePinHigh(row_pins[MATRIX_ROWS-1]);
     debounce_init(MATRIX_ROWS);
 }
 
@@ -131,22 +132,10 @@ bool has_matrix_changed(matrix_row_t current_matrix[]) {
     return false;
 }
 
-// OK, this is nasty, still not sure why its happening, but
-// this 3 key combo leads to ghosting of the 4th(the one missing from correct)
-static const uint16_t ghost1_row2 =             0B0000010000100000;
-static const uint16_t ghost1_row3 =             0B0000100000100000;
-static const matrix_row_t ghost1_row3_correct = 0B0000100000000000;
-
-void fix_ghosting_issue(matrix_row_t current_matrix[]) {
-    if (current_matrix[1] == ghost1_row2 && current_matrix[2] == ghost1_row3) {
-        current_matrix[2] = ghost1_row3_correct;
-    }
-}
-
 bool matrix_scan_custom(matrix_row_t current_matrix[]) {
     store_old_matrix(current_matrix);
     // Set row, read cols
-    for (uint8_t current_row = 0; current_row < MATRIX_ROWS-1; current_row++) {
+    for (uint8_t current_row = 0; current_row < MATRIX_ROWS; current_row++) {
         read_cols_on_row(current_matrix, current_row);
     }
     // Set col, read rows
@@ -154,9 +143,9 @@ bool matrix_scan_custom(matrix_row_t current_matrix[]) {
         read_rows_on_col(current_matrix, current_col);
     }
 
-    fix_ghosting_issue(current_matrix);
-
     fix_encoder_action(current_matrix);
+
+    fix_ghosting(current_matrix);
 
     return has_matrix_changed(current_matrix);
 }
